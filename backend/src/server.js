@@ -16,6 +16,9 @@ app.use('/api/categories', require('./routes/categories'));
  app.use('/api/reports', require('./routes/reports'));
 app.use('/api/settings', require('./routes/settings'));
  app.use('/api/invoices', require('./routes/invoices'));
+ // backend/src/server.js
+// ... tus rutas existentes
+app.use('/api/invoices', require('./routes/invoices'));
 
 app.use((err, req, res, _next) => {
   console.error(err);
