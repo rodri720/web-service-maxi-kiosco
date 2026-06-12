@@ -1,59 +1,68 @@
-const router = require('express').Router();
-const db = require('../db');
-const { auth, requireRole } = require('../middleware/auth');
+const express = require('express');
+const router = express.Router();
+const products = require('../db/products');
 
-router.use(auth);
-
-router.get('/', (req, res) => {
-  const { q, category_id, low } = req.query;
-  let sql = `SELECT p.*, c.name AS category, c.section
-             FROM products p LEFT JOIN categories c ON c.id=p.category_id WHERE p.active=1`;
-  const params = [];
-  if (q) { sql += ' AND (p.name LIKE ? OR p.barcode LIKE ?)'; params.push(`%${q}%`, `%${q}%`); }
-  if (category_id) { sql += ' AND p.category_id=?'; params.push(category_id); }
-  if (low === '1') sql += ' AND p.stock <= p.stock_min';
-  sql += ' ORDER BY p.name';
-  res.json(db.prepare(sql).all(...params));
+// GET /api/products
+router.get('/', async (req, res, next) => {
+  try {
+    const items = await products.getAll();
+    res.json(items);
+  } catch (err) { next(err); }
 });
 
-router.get('/barcode/:code', (req, res) => {
-  const p = db.prepare(`SELECT p.*, c.name AS category FROM products p
-    LEFT JOIN categories c ON c.id=p.category_id WHERE p.barcode=? AND p.active=1`).get(req.params.code);
-  if (!p) return res.status(404).json({ error: 'No encontrado' });
-  res.json(p);
+// GET /api/products/:id
+router.get('/:id', async (req, res, next) => {
+  try {
+    const item = await products.getById(req.params.id);
+    if (!item) return res.status(404).json({ error: 'Producto no encontrado' });
+    res.json(item);
+  } catch (err) { next(err); }
 });
 
-router.post('/', requireRole('admin'), (req, res) => {
-  const { barcode, name, category_id, cost, price, stock, stock_min, unit } = req.body;
-  if (!name) return res.status(400).json({ error: 'Nombre requerido' });
-  const r = db.prepare(`INSERT INTO products (barcode,name,category_id,cost,price,stock,stock_min,unit)
-    VALUES (?,?,?,?,?,?,?,?)`).run(barcode || null, name, category_id || null,
-      cost || 0, price || 0, stock || 0, stock_min || 0, unit || 'un');
-  res.json({ id: r.lastInsertRowid });
+// GET /api/products/barcode/:barcode
+router.get('/barcode/:barcode', async (req, res, next) => {
+  try {
+    const item = await products.getByBarcode(req.params.barcode);
+    if (!item) return res.status(404).json({ error: 'Producto no encontrado' });
+    res.json(item);
+  } catch (err) { next(err); }
 });
 
-router.put('/:id', requireRole('admin'), (req, res) => {
-  const { barcode, name, category_id, cost, price, stock, stock_min, unit, active } = req.body;
-  db.prepare(`UPDATE products SET barcode=?,name=?,category_id=?,cost=?,price=?,stock=?,stock_min=?,unit=?,active=?
-    WHERE id=?`).run(barcode || null, name, category_id || null, cost, price, stock, stock_min, unit,
-      active ? 1 : 0, req.params.id);
-  res.json({ ok: true });
+// POST /api/products
+router.post('/', async (req, res, next) => {
+  try {
+    const newProduct = await products.create(req.body);
+    res.status(201).json(newProduct);
+  } catch (err) { next(err); }
 });
 
-router.delete('/:id', requireRole('admin'), (req, res) => {
-  db.prepare('UPDATE products SET active=0 WHERE id=?').run(req.params.id);
-  res.json({ ok: true });
+// PUT /api/products/:id
+router.put('/:id', async (req, res, next) => {
+  try {
+    const updated = await products.update(req.params.id, req.body);
+    if (!updated) return res.status(404).json({ error: 'Producto no encontrado' });
+    res.json(updated);
+  } catch (err) { next(err); }
 });
 
-router.post('/:id/stock', requireRole('admin', 'cajero'), (req, res) => {
-  const { qty, type, reason } = req.body;
-  const product = db.prepare('SELECT * FROM products WHERE id=?').get(req.params.id);
-  if (!product) return res.status(404).json({ error: 'Producto no encontrado' });
-  const delta = type === 'salida' ? -Math.abs(qty) : Math.abs(qty);
-  db.prepare('UPDATE products SET stock=stock+? WHERE id=?').run(delta, req.params.id);
-  db.prepare(`INSERT INTO stock_movements (product_id,type,qty,reason,user_id) VALUES (?,?,?,?,?)`)
-    .run(req.params.id, type || 'ingreso', delta, reason || '', req.user.id);
-  res.json({ ok: true });
+// DELETE /api/products/:id
+router.delete('/:id', async (req, res, next) => {
+  try {
+    const deleted = await products.remove(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Producto no encontrado' });
+    res.status(204).send();
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/products/:id/stock (para ajustar stock)
+router.patch('/:id/stock', async (req, res, next) => {
+  try {
+    const { qty } = req.body;
+    if (qty === undefined) return res.status(400).json({ error: 'Falta cantidad (qty)' });
+    const newStock = await products.updateStock(req.params.id, qty);
+    if (newStock === null) return res.status(404).json({ error: 'Producto no encontrado' });
+    res.json({ stock: newStock });
+  } catch (err) { next(err); }
 });
 
 module.exports = router;
