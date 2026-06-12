@@ -7,8 +7,8 @@ function pad(n, w) { return String(n).padStart(w, '0'); }
 
 async function printTicket({ sale, items, customer, company }) {
   const { ThermalPrinter, PrinterTypes } = require('node-thermal-printer');
-  const type = (settings.get('printer_type', 'browser') || '').toLowerCase();
-  const iface = settings.get('printer_interface', '');
+  const type = (await settings.get('printer_type', 'browser') || '').toLowerCase();
+  const iface = await settings.get('printer_interface', '');
   if (!iface) throw new Error('Configura la interfaz de la impresora (tcp://ip:9100 o printer:NOMBRE)');
 
   const printer = new ThermalPrinter({

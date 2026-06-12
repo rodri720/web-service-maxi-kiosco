@@ -1,59 +1,69 @@
-const router = require('express').Router();
-const db = require('../db');
-const { auth, requireRole } = require('../middleware/auth');
 
-router.use(auth, requireRole('admin'));
+const express = require('express');
+const router = express.Router();
+const reports = require('../db/reports');
 
-router.get('/dashboard', (req, res) => {
-  const today = new Date().toISOString().slice(0, 10);
-  const totalToday = db.prepare(`SELECT COALESCE(SUM(total),0) AS t, COUNT(*) AS c
-    FROM sales WHERE date(created_at)=date(?)`).get(today);
-  const week = db.prepare(`SELECT COALESCE(SUM(total),0) AS t FROM sales
-    WHERE created_at >= datetime('now','-7 days')`).get();
-  const month = db.prepare(`SELECT COALESCE(SUM(total),0) AS t FROM sales
-    WHERE created_at >= datetime('now','-30 days')`).get();
-  const lowStock = db.prepare(`SELECT COUNT(*) AS c FROM products WHERE stock <= stock_min AND active=1`).get();
-  const productCount = db.prepare(`SELECT COUNT(*) AS c FROM products WHERE active=1`).get();
-  res.json({
-    today: { total: totalToday.t, count: totalToday.c },
-    week: week.t,
-    month: month.t,
-    lowStock: lowStock.c,
-    productCount: productCount.c,
-  });
+// Dashboard: devuelve datos para el panel principal
+router.get('/dashboard', async (req, res, next) => {
+  try {
+    const [today, week, month, productCount, lowStockCount] = await Promise.all([
+      reports.getTodaySales(),
+      reports.getSalesLastDays(7),
+      reports.getSalesLastDays(30),
+      reports.getProductCount(),
+      reports.getLowStockCount()
+    ]);
+    res.json({
+      today: { total: today.total, count: today.count },
+      week: week,
+      month: month,
+      productCount: productCount,
+      lowStock: lowStockCount
+    });
+  } catch (err) { next(err); }
 });
 
-router.get('/sales-by-day', (req, res) => {
-  const rows = db.prepare(`SELECT date(created_at) AS day, COUNT(*) AS qty, SUM(total) AS total
-    FROM sales WHERE created_at >= datetime('now','-30 days')
-    GROUP BY date(created_at) ORDER BY day`).all();
-  res.json(rows);
+// Ventas por día en un rango (para gráfico)
+router.get('/sales-by-day', async (req, res, next) => {
+  try {
+    let { from, to } = req.query;
+    if (!from || !to) {
+      const today = new Date();
+      const lastWeek = new Date();
+      lastWeek.setDate(today.getDate() - 30);
+      from = lastWeek.toISOString().split('T')[0];
+      to = today.toISOString().split('T')[0];
+    }
+    const data = await reports.salesByDay(from, to);
+    res.json(data.map(d => ({ day: d.day, total: parseFloat(d.total_amount) })));
+  } catch (err) { next(err); }
 });
 
-router.get('/top-products', (req, res) => {
-  const rows = db.prepare(`SELECT p.name, SUM(si.qty) AS qty, SUM(si.subtotal) AS total
-    FROM sale_items si JOIN products p ON p.id=si.product_id
-    JOIN sales s ON s.id=si.sale_id
-    WHERE s.created_at >= datetime('now','-30 days')
-    GROUP BY p.id ORDER BY qty DESC LIMIT 10`).all();
-  res.json(rows);
+// Top productos
+router.get('/top-products', async (req, res, next) => {
+  try {
+    const limit = req.query.limit ? parseInt(req.query.limit) : 10;
+    const data = await reports.topProducts(limit);
+    res.json(data);
+  } catch (err) { next(err); }
 });
 
-router.get('/sales-by-section', (req, res) => {
-  const rows = db.prepare(`SELECT c.section, SUM(si.subtotal) AS total
-    FROM sale_items si
-    JOIN products p ON p.id=si.product_id
-    LEFT JOIN categories c ON c.id=p.category_id
-    JOIN sales s ON s.id=si.sale_id
-    WHERE s.created_at >= datetime('now','-30 days')
-    GROUP BY c.section ORDER BY total DESC`).all();
-  res.json(rows);
+// Productos con stock bajo (detalle)
+router.get('/low-stock', async (req, res, next) => {
+  try {
+    const data = await reports.lowStock();
+    res.json(data);
+  } catch (err) { next(err); }
 });
 
-router.get('/low-stock', (req, res) => {
-  res.json(db.prepare(`SELECT p.*, c.name AS category FROM products p
-    LEFT JOIN categories c ON c.id=p.category_id
-    WHERE p.active=1 AND p.stock <= p.stock_min ORDER BY p.stock`).all());
+// (Opcional) Mantenemos compatibilidad con endpoints anteriores
+router.get('/sales/day', async (req, res, next) => {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'Faltan fechas' });
+    const data = await reports.salesByDay(from, to);
+    res.json(data);
+  } catch (err) { next(err); }
 });
 
 module.exports = router;

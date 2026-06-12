@@ -1,3 +1,4 @@
+
 const sql = require('../../db');
 
 async function getAll() {
@@ -9,19 +10,19 @@ async function getById(id) {
   return rows[0] || null;
 }
 
-async function create(cat) {
+async function create(data) {
   const rows = await sql`
     INSERT INTO categories (name, section)
-    VALUES (${cat.name}, ${cat.section || 'kiosco'})
+    VALUES (${data.name}, ${data.section || 'kiosco'})
     RETURNING *
   `;
   return rows[0];
 }
 
-async function update(id, cat) {
+async function update(id, data) {
   const rows = await sql`
     UPDATE categories
-    SET name = ${cat.name}, section = ${cat.section || 'kiosco'}
+    SET name = ${data.name}, section = ${data.section || 'kiosco'}
     WHERE id = ${id}
     RETURNING *
   `;

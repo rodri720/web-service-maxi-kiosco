@@ -9,14 +9,16 @@
     "seed": "node src/db/seed.js"
   },
   "dependencies": {
-    "@afipsdk/afip.js": "^1.0.7",
+    "@afipsdk/afip.js": "^1.2.3",
     "@neondatabase/serverless": "^1.1.0",
-    "better-sqlite3": "^12.10.0",
+    "@popperjs/core": "^2.11.8",
+    "bcryptjs": "^3.0.3",
+    "bootstrap": "^5.3.8",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.21.0",
-    "node-thermal-printer": "^4.4.5",
-    "pdfkit": "^0.15.0",
+    "node-thermal-printer": "^4.6.0",
+    "pdfkit": "^0.15.2",
     "pg": "^8.21.0",
     "qrcode": "^1.5.4"
   }

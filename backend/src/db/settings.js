@@ -1,4 +1,5 @@
-const sql = require('../../db');  // conexión a Neon
+// backend/src/db/settings.js
+const sql = require('../../db');
 
 async function getAll() {
   const rows = await sql`SELECT key, value FROM settings`;

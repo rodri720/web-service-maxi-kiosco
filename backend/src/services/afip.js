@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const settings = require('../db/settings');
+const sql = require('../../db'); // para consultar último número en modo simulado
 
 const TIPO_FACTURA_C = 11;
 const DOC_DNI = 96;
@@ -10,13 +11,14 @@ const DOC_CUIT = 80;
 const DOC_CF = 99;
 
 let afipInstance = null;
-function getAfip() {
+
+async function getAfip() {
   if (afipInstance) return afipInstance;
   const Afip = require('@afipsdk/afip.js');
-  const cuit = parseInt(settings.get('company_cuit'), 10);
-  const certPath = settings.get('afip_cert');
-  const keyPath = settings.get('afip_key');
-  const production = settings.get('afip_production') === '1';
+  const cuit = parseInt(await settings.get('company_cuit'), 10);
+  const certPath = await settings.get('afip_cert');
+  const keyPath = await settings.get('afip_key');
+  const production = (await settings.get('afip_production')) === '1';
   if (!cuit || !certPath || !keyPath) throw new Error('Faltan credenciales AFIP (CUIT/cert/key)');
   if (!fs.existsSync(certPath) || !fs.existsSync(keyPath))
     throw new Error('Cert o key no existen en disco');
@@ -39,7 +41,6 @@ function fmtIso(d = new Date()) {
   return d.toISOString().slice(0, 10);
 }
 
-// Genera el QR oficial AFIP (data en base64 con URL https://www.afip.gob.ar/fe/qr/?p=...)
 function buildAfipQR({ cuit, fecha, ptoVta, tipoCmp, nroCmp, importe, docTipo, docNro, cae }) {
   const data = {
     ver: 1, fecha, cuit: parseInt(cuit, 10),
@@ -53,29 +54,29 @@ function buildAfipQR({ cuit, fecha, ptoVta, tipoCmp, nroCmp, importe, docTipo, d
 }
 
 async function getNextNumber(ptoVta, tipoCmp) {
-  const mode = settings.get('afip_mode', 'simulado');
+  const mode = await settings.get('afip_mode', 'simulado');
   if (mode === 'simulado') {
-    const db = require('../db');
-    const row = db.prepare(`SELECT MAX(cbte_nro) AS n FROM sales WHERE pto_vta=? AND invoice_type='C'`).get(ptoVta);
-    return (row?.n || 0) + 1;
+    const rows = await sql`
+      SELECT MAX(cbte_nro) AS n
+      FROM sales
+      WHERE pto_vta = ${ptoVta} AND invoice_type = 'C'
+    `;
+    return (rows[0]?.n || 0) + 1;
   }
-  const afip = getAfip();
+  const afip = await getAfip();
   const last = await afip.ElectronicBilling.getLastVoucher(ptoVta, tipoCmp);
   return (last || 0) + 1;
 }
 
 async function emitFacturaC({ saleTotal, customer }) {
-  const ptoVta = parseInt(settings.get('pto_vta', '1'), 10);
-  const cuit = settings.get('company_cuit');
-  const mode = settings.get('afip_mode', 'simulado');
+  const ptoVta = parseInt(await settings.get('pto_vta', '1'), 10);
+  const cuit = await settings.get('company_cuit');
+  const mode = await settings.get('afip_mode', 'simulado');
 
-  // Tipo y numero de doc del receptor
   let docTipo = DOC_CF, docNro = 0;
   if (customer && customer.doc_number && parseInt(customer.doc_number, 10) > 0) {
     if (customer.doc_type === 'CUIT') { docTipo = DOC_CUIT; docNro = customer.doc_number; }
     else { docTipo = DOC_DNI; docNro = customer.doc_number; }
-  } else if (saleTotal >= 417288) {
-    // Si supera el limite y es CF sin datos AFIP exige identificar - dejamos pasar en simulado
   }
 
   const cbteNro = await getNextNumber(ptoVta, TIPO_FACTURA_C);
@@ -99,7 +100,7 @@ async function emitFacturaC({ saleTotal, customer }) {
   }
 
   // Modo real AFIP
-  const afip = getAfip();
+  const afip = await getAfip();
   const data = {
     CantReg: 1, PtoVta: ptoVta, CbteTipo: TIPO_FACTURA_C, Concepto: 1,
     DocTipo: docTipo, DocNro: parseInt(docNro, 10) || 0,
