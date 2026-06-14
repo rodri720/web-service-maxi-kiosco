@@ -1,5 +1,4 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
-import { getToken } from './lib/api';
+import { Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -9,22 +8,24 @@ import Stock from './pages/Stock';
 import Cash from './pages/Cash';
 import Sales from './pages/Sales';
 import Reports from './pages/Reports';
+// Eliminado: import Configuracion from './pages/Configuracion';
 
-function Protected({ children }) {
-  return getToken() ? <Layout>{children}</Layout> : <Navigate to="/login" replace />;
-}
+const ProtectedRoute = ({ children }) => children; // temporal sin auth
 
 export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
-      <Route path="/" element={<Protected><Dashboard /></Protected>} />
-      <Route path="/pos" element={<Protected><POS /></Protected>} />
-      <Route path="/products" element={<Protected><Products /></Protected>} />
-      <Route path="/stock" element={<Protected><Stock /></Protected>} />
-      <Route path="/cash" element={<Protected><Cash /></Protected>} />
-      <Route path="/sales" element={<Protected><Sales /></Protected>} />
-      <Route path="/reports" element={<Protected><Reports /></Protected>} />
+      <Route element={<Layout />}>
+        <Route index element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+        <Route path="pos" element={<ProtectedRoute><POS /></ProtectedRoute>} />
+        <Route path="ventas" element={<ProtectedRoute><Sales /></ProtectedRoute>} />
+        <Route path="caja" element={<ProtectedRoute><Cash /></ProtectedRoute>} />
+        <Route path="productos" element={<ProtectedRoute><Products /></ProtectedRoute>} />
+        <Route path="stock" element={<ProtectedRoute><Stock /></ProtectedRoute>} />
+        <Route path="reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+        {/* Ruta de configuración eliminada */}
+      </Route>
     </Routes>
   );
 }

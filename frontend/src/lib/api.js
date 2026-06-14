@@ -1,4 +1,4 @@
-const BASE = '/api';
+const BASE = 'http://localhost:4000/api';
 
 export function getToken() { return localStorage.getItem('token'); }
 export function setToken(t) { localStorage.setItem('token', t); }
@@ -11,14 +11,9 @@ export function setUser(u) { localStorage.setItem('user', JSON.stringify(u)); }
 
 export async function api(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
-  const token = getToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
+  // const token = getToken();
+  // if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(BASE + path, { ...opts, headers });
-  if (res.status === 401) {
-    clearToken();
-    if (location.pathname !== '/login') location.href = '/login';
-    throw new Error('No autorizado');
-  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Error');
   return data;

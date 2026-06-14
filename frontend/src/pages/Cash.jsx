@@ -2,145 +2,322 @@ import { useEffect, useState } from 'react';
 import { api, money } from '../lib/api';
 
 export default function Cash() {
-  const [reg, setReg] = useState(null);
-  const [opening, setOpening] = useState(0);
-  const [closing, setClosing] = useState(0);
-  const [summary, setSummary] = useState(null);
-  const [history, setHistory] = useState([]);
-  const [mov, setMov] = useState({ type: 'ingreso', amount: 0, reason: '' });
-  const [closeResult, setCloseResult] = useState(null);
+  const [register, setRegister] = useState(null);
+  const [openingAmount, setOpeningAmount] = useState(0);
+  const [msg, setMsg] = useState('');
+  const [movements, setMovements] = useState([]);
+  const [summary, setSummary] = useState({ ventas: 0, gastos: 0, retiros: 0, ingresosExtra: 0 });
+  const [newMovement, setNewMovement] = useState({ type: 'gasto', amount: 0, reason: '' });
+  const [closingAmount, setClosingAmount] = useState(0);
+  const [showCloseModal, setShowCloseModal] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('movimientos');
 
-  const load = () => {
-    api('/cash/current').then(r => {
-      setReg(r);
-      if (r) api(`/cash/${r.id}/summary`).then(setSummary);
-    });
-    api('/cash').then(setHistory);
+  const loadRegister = async () => {
+    try {
+      const data = await api('/cash/register');
+      setRegister(data || null);
+      if (data && data.id) {
+        await loadMovements(data.id);
+        await loadSummary(data.id);
+      }
+    } catch (err) {
+      setRegister(null);
+    }
   };
-  useEffect(load, []);
 
-  async function open() {
-    await api('/cash/open', { method: 'POST', body: JSON.stringify({ opening_amount: parseFloat(opening) || 0 }) });
-    setOpening(0); load();
-  }
-  async function addMov() {
-    await api(`/cash/${reg.id}/movement`, { method: 'POST', body: JSON.stringify({ ...mov, amount: parseFloat(mov.amount) }) });
-    setMov({ type: 'ingreso', amount: 0, reason: '' }); load();
-  }
-  async function close() {
-    if (!confirm('Cerrar caja?')) return;
-    const r = await api(`/cash/${reg.id}/close`, { method: 'POST', body: JSON.stringify({ closing_amount: parseFloat(closing) || 0 }) });
-    setCloseResult(r); setClosing(0); load();
-  }
+  const loadMovements = async (registerId) => {
+    try {
+      const data = await api(`/cash/movements/${registerId}`);
+      setMovements(data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
-  return (
-    <div className="p-8 space-y-6">
-      <h1 className="text-2xl font-bold">Caja</h1>
+  const loadSummary = async (registerId) => {
+    try {
+      const data = await api(`/cash/summary/${registerId}`);
+      setSummary(data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
-      {!reg && (
-        <div className="card max-w-md">
-          <h2 className="font-semibold mb-3">Abrir caja</h2>
-          <label className="label">Monto inicial</label>
-          <input type="number" className="input mt-1 mb-3" value={opening} onChange={e => setOpening(e.target.value)} />
-          <button onClick={open} className="btn-primary w-full">Abrir caja</button>
-        </div>
-      )}
+  useEffect(() => {
+    loadRegister();
+    const interval = setInterval(() => {
+      if (register && register.status === 'abierta') {
+        loadMovements(register.id);
+        loadSummary(register.id);
+      }
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [register]);
 
-      {reg && summary && (
-        <div className="grid md:grid-cols-2 gap-6">
-          <div className="card">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-semibold">Caja #{reg.id} abierta</h2>
-              <span className="text-xs text-slate-500">{new Date(reg.opened_at).toLocaleString()}</span>
-            </div>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between"><span>Apertura:</span><b>{money(reg.opening_amount)}</b></div>
-              <div className="flex justify-between"><span>Total ventas:</span><b>{money(summary.totalSales)}</b></div>
-              <div className="border-t pt-2">
-                <div className="label mb-1">Por metodo</div>
-                {summary.byMethod.map(m => (
-                  <div key={m.payment_method} className="flex justify-between">
-                    <span className="capitalize">{m.payment_method}</span>
-                    <span>{m.qty} - {money(m.total)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+  const openRegister = async () => {
+    if (openingAmount < 0) {
+      setMsg('El monto de apertura no puede ser negativo');
+      return;
+    }
+    setLoading(true);
+    try {
+      await api('/cash/open', {
+        method: 'POST',
+        body: JSON.stringify({
+          user_id: 1,
+          opening_amount: openingAmount,
+          notes: 'Apertura desde interfaz'
+        })
+      });
+      setMsg('✅ Caja abierta correctamente');
+      loadRegister();
+      setOpeningAmount(0);
+    } catch (err) {
+      setMsg('❌ Error al abrir caja: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-            <div className="border-t mt-4 pt-3">
-              <div className="label mb-2">Movimientos manuales</div>
-              <div className="grid grid-cols-3 gap-2">
-                <select className="input" value={mov.type} onChange={e => setMov({ ...mov, type: e.target.value })}>
-                  <option value="ingreso">Ingreso</option><option value="egreso">Egreso</option>
-                </select>
-                <input type="number" placeholder="Monto" className="input" value={mov.amount}
-                  onChange={e => setMov({ ...mov, amount: e.target.value })} />
-                <button onClick={addMov} className="btn-primary">Agregar</button>
-              </div>
-              <input className="input mt-2" placeholder="Motivo" value={mov.reason}
-                onChange={e => setMov({ ...mov, reason: e.target.value })} />
-              <div className="mt-3 max-h-40 overflow-auto text-sm">
-                {summary.movements.map(m => (
-                  <div key={m.id} className="flex justify-between border-b py-1">
-                    <span className={m.type === 'ingreso' ? 'text-emerald-600' : 'text-red-600'}>
-                      {m.type === 'ingreso' ? '+' : '-'} {money(m.amount)}
-                    </span>
-                    <span className="text-slate-500 text-xs">{m.reason}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+  const addMovement = async () => {
+    if (!register) return;
+    if (newMovement.amount <= 0) {
+      setMsg('El monto debe ser mayor a cero');
+      return;
+    }
+    if (!newMovement.reason) {
+      setMsg('Debe ingresar una razón o descripción');
+      return;
+    }
+    setLoading(true);
+    try {
+      await api('/cash/movement', {
+        method: 'POST',
+        body: JSON.stringify({
+          register_id: register.id,
+          type: newMovement.type,
+          amount: newMovement.amount,
+          reason: newMovement.reason
+        })
+      });
+      setMsg('✅ Movimiento registrado');
+      setNewMovement({ type: 'gasto', amount: 0, reason: '' });
+      await loadMovements(register.id);
+      await loadSummary(register.id);
+      setTimeout(() => setMsg(''), 3000);
+    } catch (err) {
+      setMsg('❌ Error: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const closeRegister = async () => {
+    if (closingAmount < 0) {
+      setMsg('El monto de cierre no puede ser negativo');
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await api('/cash/close', {
+        method: 'POST',
+        body: JSON.stringify({
+          id: register.id,
+          closing_amount: closingAmount,
+          notes: 'Cierre manual'
+        })
+      });
+      setMsg(`✅ Caja cerrada. Diferencia: ${money(result.difference)}`);
+      setShowCloseModal(false);
+      loadRegister();
+    } catch (err) {
+      setMsg('❌ Error al cerrar caja: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const expectedTotal = register ? (parseFloat(register.opening_amount) + summary.ventas + summary.ingresosExtra - summary.gastos - summary.retiros) : 0;
+
+  // Caja cerrada
+  if (!register) {
+    return (
+      <div className="container mt-4">
+        <div className="card shadow-sm mx-auto" style={{ maxWidth: '500px' }}>
+          <div className="card-header bg-primary text-white">
+            <h4 className="mb-0">Abrir Caja</h4>
           </div>
-
-          <div className="card">
-            <h2 className="font-semibold mb-3">Cierre de caja</h2>
-            <p className="text-sm text-slate-600 mb-3">
-              Ingresa el efectivo contado. El sistema calcula la diferencia con lo esperado.
-            </p>
-            <label className="label">Efectivo en caja al cierre</label>
-            <input type="number" className="input mt-1 mb-3" value={closing} onChange={e => setClosing(e.target.value)} />
-            <button onClick={close} className="btn-danger w-full">Cerrar caja</button>
-            {closeResult && (
-              <div className="mt-4 bg-slate-50 rounded-lg p-3 text-sm space-y-1">
-                <div className="flex justify-between"><span>Esperado:</span><b>{money(closeResult.expected)}</b></div>
-                <div className="flex justify-between">
-                  <span>Diferencia:</span>
-                  <b className={closeResult.difference < 0 ? 'text-red-600' : 'text-emerald-600'}>
-                    {money(closeResult.difference)}
-                  </b>
-                </div>
-              </div>
-            )}
+          <div className="card-body">
+            <div className="mb-3">
+              <label className="form-label">Monto de apertura ($)</label>
+              <input
+                type="number"
+                className="form-control"
+                value={openingAmount}
+                onChange={(e) => setOpeningAmount(parseFloat(e.target.value) || 0)}
+              />
+            </div>
+            <button className="btn btn-primary w-100" onClick={openRegister} disabled={loading}>
+              {loading ? 'Abriendo...' : 'Abrir Caja'}
+            </button>
+            {msg && <div className="alert alert-info mt-3">{msg}</div>}
           </div>
         </div>
-      )}
-
-      <div className="card">
-        <h2 className="font-semibold mb-3">Historial de cajas</h2>
-        <table className="w-full text-sm">
-          <thead className="text-left text-slate-500 border-b">
-            <tr><th className="py-2">#</th><th>Usuario</th><th>Apertura</th><th>Cierre</th>
-              <th className="text-right">Esperado</th><th className="text-right">Contado</th>
-              <th className="text-right">Diferencia</th><th>Estado</th></tr>
-          </thead>
-          <tbody>
-            {history.map(h => (
-              <tr key={h.id} className="border-b last:border-0">
-                <td className="py-2">{h.id}</td>
-                <td>{h.user_name}</td>
-                <td className="text-xs">{new Date(h.opened_at).toLocaleString()}</td>
-                <td className="text-xs">{h.closed_at ? new Date(h.closed_at).toLocaleString() : '-'}</td>
-                <td className="text-right">{h.expected_amount != null ? money(h.expected_amount) : '-'}</td>
-                <td className="text-right">{h.closing_amount != null ? money(h.closing_amount) : '-'}</td>
-                <td className={`text-right ${h.difference < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                  {h.difference != null ? money(h.difference) : '-'}
-                </td>
-                <td><span className={`text-xs px-2 py-0.5 rounded ${h.status === 'abierta' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200'}`}>{h.status}</span></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
       </div>
+    );
+  }
+
+  // Caja abierta
+  return (
+    <div className="container mt-4">
+      <div className="row">
+        <div className="col-md-4">
+          <div className="card shadow-sm mb-3">
+            <div className="card-header bg-success text-white">
+              <h5 className="mb-0">Caja #{register.id} - Abierta</h5>
+            </div>
+            <div className="card-body">
+              <p><strong>Apertura:</strong> {money(register.opening_amount)}</p>
+              <p><strong>Fecha apertura:</strong> {new Date(register.opened_at).toLocaleString()}</p>
+              <hr />
+              <h6>Resumen del día</h6>
+              <ul className="list-unstyled">
+                <li>💰 Ventas: {money(summary.ventas || 0)}</li>
+                <li>📉 Gastos: {money(summary.gastos || 0)}</li>
+                <li>💸 Retiros: {money(summary.retiros || 0)}</li>
+                <li>📈 Ingresos extra: {money(summary.ingresosExtra || 0)}</li>
+                <li className="fw-bold mt-2">Efectivo esperado: {money(expectedTotal)}</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div className="col-md-8">
+          <div className="card shadow-sm">
+            <div className="card-header">
+              <ul className="nav nav-tabs card-header-tabs">
+                <li className="nav-item">
+                  <button className={`nav-link ${activeTab === 'movimientos' ? 'active' : ''}`} onClick={() => setActiveTab('movimientos')}>
+                    Movimientos
+                  </button>
+                </li>
+                <li className="nav-item">
+                  <button className={`nav-link ${activeTab === 'nuevo' ? 'active' : ''}`} onClick={() => setActiveTab('nuevo')}>
+                    Registrar Gasto/Retiro
+                  </button>
+                </li>
+                <li className="nav-item">
+                  <button className={`nav-link ${activeTab === 'cierre' ? 'active' : ''}`} onClick={() => setActiveTab('cierre')}>
+                    Cierre de Caja
+                  </button>
+                </li>
+              </ul>
+            </div>
+            <div className="card-body">
+              {activeTab === 'movimientos' && (
+                <div className="table-responsive" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                  <table className="table table-sm table-hover">
+                    <thead className="table-light">
+                      <tr><th>Fecha</th><th>Tipo</th><th>Monto</th><th>Razón</th></tr>
+                    </thead>
+                    <tbody>
+                      {movements.map(m => (
+                        <tr key={m.id}>
+                          <td>{new Date(m.created_at).toLocaleTimeString()}</td>
+                          <td>
+                            <span className={`badge ${m.type === 'venta' ? 'bg-success' : m.type === 'gasto' ? 'bg-danger' : m.type === 'retiro' ? 'bg-warning' : 'bg-info'}`}>
+                              {m.type === 'venta' ? 'Venta' : m.type === 'gasto' ? 'Gasto' : m.type === 'retiro' ? 'Retiro' : 'Ingreso extra'}
+                            </span>
+                          </td>
+                          <td>{money(m.amount)}</td>
+                          <td>{m.reason}</td>
+                        </tr>
+                      ))}
+                      {movements.length === 0 && <tr><td colSpan="4" className="text-center">Sin movimientos</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {activeTab === 'nuevo' && (
+                <div className="row g-3">
+                  <div className="col-md-4">
+                    <label className="form-label">Tipo</label>
+                    <select className="form-select" value={newMovement.type} onChange={(e) => setNewMovement({ ...newMovement, type: e.target.value })}>
+                      <option value="gasto">Gasto (pago a proveedor, servicio, etc.)</option>
+                      <option value="retiro">Retiro (dinero sacado de caja)</option>
+                      <option value="ingreso_extra">Ingreso extra (no ventas)</option>
+                    </select>
+                  </div>
+                  <div className="col-md-4">
+                    <label className="form-label">Monto ($)</label>
+                    <input type="number" step="0.01" className="form-control" value={newMovement.amount} onChange={(e) => setNewMovement({ ...newMovement, amount: parseFloat(e.target.value) || 0 })} />
+                  </div>
+                  <div className="col-md-4">
+                    <label className="form-label">Razón / Descripción</label>
+                    <input type="text" className="form-control" value={newMovement.reason} onChange={(e) => setNewMovement({ ...newMovement, reason: e.target.value })} />
+                  </div>
+                  <div className="col-12">
+                    <button className="btn btn-primary" onClick={addMovement} disabled={loading}>
+                      Registrar Movimiento
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'cierre' && (
+                <div>
+                  <div className="alert alert-warning">
+                    <strong>⚠️ Importante:</strong> Antes de cerrar, asegúrate de tener registrados todos los gastos, retiros e ingresos extra del día.
+                  </div>
+                  <div className="row g-3">
+                    <div className="col-md-6">
+                      <label className="form-label">Efectivo declarado (arqueo) ($)</label>
+                      <input type="number" step="0.01" className="form-control" value={closingAmount} onChange={(e) => setClosingAmount(parseFloat(e.target.value) || 0)} />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">Efectivo esperado</label>
+                      <input type="text" className="form-control" value={money(expectedTotal)} disabled />
+                    </div>
+                    <div className="col-12">
+                      <button className="btn btn-danger" onClick={() => setShowCloseModal(true)}>Cerrar Caja</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {msg && <div className="alert alert-info mt-3">{msg}</div>}
+
+      {/* Modal de confirmación de cierre */}
+      {showCloseModal && (
+        <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} tabIndex="-1">
+          <div className="modal-dialog">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">Confirmar cierre de caja</h5>
+                <button type="button" className="btn-close" onClick={() => setShowCloseModal(false)}></button>
+              </div>
+              <div className="modal-body">
+                <p><strong>Monto declarado:</strong> {money(closingAmount)}</p>
+                <p><strong>Monto esperado:</strong> {money(expectedTotal)}</p>
+                <p className={`fw-bold ${closingAmount !== expectedTotal ? 'text-danger' : 'text-success'}`}>
+                  Diferencia: {money(closingAmount - expectedTotal)}
+                </p>
+                <p>¿Deseas cerrar la caja?</p>
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-secondary" onClick={() => setShowCloseModal(false)}>Cancelar</button>
+                <button className="btn btn-danger" onClick={closeRegister}>Cerrar Caja</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
