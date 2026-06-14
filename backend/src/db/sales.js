@@ -1,4 +1,5 @@
 const sql = require('../../db');
+const cash = require('./cash'); // Importa el modelo de caja (ajusta la ruta si es necesario)
 
 async function getAll() {
   return await sql`
@@ -18,7 +19,7 @@ async function getById(id) {
 }
 
 async function create(saleData, items) {
-  // Insertar la venta (user_id opcional)
+  // Insertar la venta
   const saleRows = await sql`
     INSERT INTO sales (register_id, user_id, customer_id, total, payment_method, invoice_type, pto_vta, cbte_nro, cae, cae_due, afip_qr)
     VALUES (${saleData.register_id || null}, ${saleData.user_id || null}, ${saleData.customer_id || null}, ${saleData.total}, ${saleData.payment_method || 'efectivo'}, ${saleData.invoice_type || 'X'}, ${saleData.pto_vta || null}, ${saleData.cbte_nro || null}, ${saleData.cae || null}, ${saleData.cae_due || null}, ${saleData.afip_qr || null})
@@ -36,11 +37,9 @@ async function create(saleData, items) {
     `;
   }
 
+  // Registrar movimiento de caja si es efectivo y hay register_id
   if (saleData.payment_method === 'efectivo' && saleData.register_id) {
-    await sql`
-      INSERT INTO cash_movements (register_id, type, amount, reason)
-      VALUES (${saleData.register_id}, 'venta', ${saleData.total}, 'Venta #' || ${sale.id})
-    `;
+    await cash.addMovement(saleData.register_id, 'venta', saleData.total, `Venta #${sale.id}`);
   }
 
   return sale;
